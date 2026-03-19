@@ -11,7 +11,6 @@ const MAX_RETRIES = 3;
 let stopped = false;
 
 // ─── Message listener ─────────────────────────────────────────────────────────
-// Guard: only register one listener even if the script is injected multiple times
 if (!window.__linkedinScraperActive) {
   window.__linkedinScraperActive = true;
 
@@ -23,13 +22,11 @@ if (!window.__linkedinScraperActive) {
       });
       sendResponse({ ok: true });
     }
-
     if (message.action === "stop") {
       stopped = true;
       sendResponse({ ok: true });
     }
-
-    return false; // synchronous response
+    return false;
   });
 }
 
@@ -43,23 +40,33 @@ async function runScraper({ schoolName, currentlyEnrolledOnly, csrfToken }) {
   while (!stopped) {
     reportStatus(`Fetching page starting at ${start}…`);
 
-    const data = await fetchConnectionsPage(start, csrfToken);
+    const json = await fetchConnectionsPage(start, csrfToken);
+    if (!json) return;
 
-    if (!data) {
-      // fetchConnectionsPage already handled retry logic and reported the error
-      return;
-    }
+    // LinkedIn normalized JSON: root data lives under json.data, related
+    // entities live in json.included (array). Some older decorations put
+    // everything at the root. Handle both.
+    const root     = json.data ?? json;
+    const included = json.included ?? [];
+    const paging   = root.paging ?? root.metadata?.paging;
+    const elements = root.elements ?? [];
 
     if (total === null) {
-      total = data.paging?.total ?? 0;
+      total = paging?.total ?? 0;
     }
 
-    const elements = data.elements ?? [];
+    // Build a URN → entity lookup from included
+    const byUrn = buildUrnMap(included);
+
+    console.log("[LI Scraper] page start=" + start,
+      "elements:", elements.length,
+      "included:", included.length,
+      "total:", total,
+      "sample element:", JSON.stringify(elements[0] ?? {}).slice(0, 300));
 
     for (const element of elements) {
-      const conn = parseConnection(element);
+      const conn = parseConnection(element, byUrn, included);
       if (!conn) { skipped++; continue; }
-      if (!conn.educations.length) { skipped++; continue; }
       allConnections.push(conn);
     }
 
@@ -69,14 +76,13 @@ async function runScraper({ schoolName, currentlyEnrolledOnly, csrfToken }) {
     if (elements.length === 0 || fetched >= total) break;
     start = fetched;
 
-    // Rate-limit delay between pages
     const delay = BASE_DELAY + Math.random() * JITTER;
     await sleep(delay);
   }
 
   if (stopped) return;
 
-  // Filter connections by criteria
+  // Filter connections
   const results = [];
   for (const conn of allConnections) {
     const matchedEdu = findMatchingEducation(conn.educations, schoolName, currentlyEnrolledOnly);
@@ -85,17 +91,140 @@ async function runScraper({ schoolName, currentlyEnrolledOnly, csrfToken }) {
     }
   }
 
-  // Cache results in session storage via background SW
-  chrome.runtime.sendMessage({
-    action: "saveResults",
-    data: { results, skipped, schoolName },
-  });
+  console.log("[LI Scraper] done. total fetched:", allConnections.length,
+    "matched:", results.length, "skipped (no profile):", skipped);
 
-  // Report completion to popup
+  chrome.runtime.sendMessage({ action: "saveResults", data: { results, skipped, schoolName } });
   chrome.runtime.sendMessage({ action: "complete", results, skipped });
 }
 
-// ─── Voyager API fetch (with retry) ──────────────────────────────────────────
+// ─── Build URN → entity map from included array ───────────────────────────────
+function buildUrnMap(included) {
+  const map = {};
+  for (const item of included) {
+    if (item.entityUrn) map[item.entityUrn] = item;
+    // Some items use *id or trackingUrn as alternate keys
+    if (item['*id']) map[item['*id']] = item;
+  }
+  return map;
+}
+
+// ─── Parse a connection element ───────────────────────────────────────────────
+function parseConnection(element, byUrn, included) {
+  // Resolve the profile — may be inline object OR a URN string to look up
+  let profile = element.connectedMemberResolutionResult;
+  if (typeof profile === "string") {
+    profile = byUrn[profile] ?? null;
+  }
+
+  // Fallback: try other common keys
+  if (!profile) {
+    const profileUrn = element['*profile'] ?? element['*connectedMember'];
+    if (profileUrn) profile = byUrn[profileUrn] ?? null;
+  }
+
+  if (!profile) {
+    console.log("[LI Scraper] no profile for element:", JSON.stringify(element).slice(0, 200));
+    return null;
+  }
+
+  // Extract education — may be inline or referenced by URNs in included
+  const educations = extractEducations(profile, byUrn, included);
+
+  return {
+    firstName:  profile.firstName   ?? profile.localizedFirstName  ?? "",
+    lastName:   profile.lastName    ?? profile.localizedLastName   ?? "",
+    headline:   profile.headline    ?? profile.localizedHeadline   ?? "",
+    profileUrl: profile.publicIdentifier
+      ? `https://www.linkedin.com/in/${profile.publicIdentifier}/`
+      : (profile.vanityName ? `https://www.linkedin.com/in/${profile.vanityName}/` : ""),
+    entityUrn:  profile.entityUrn   ?? "",
+    educations,
+  };
+}
+
+// ─── Education extraction ─────────────────────────────────────────────────────
+function extractEducations(profile, byUrn, included) {
+  const results = [];
+
+  // Strategy 1: inline elements array
+  const inlineElements = profile.educations?.elements ?? profile.education?.elements ?? [];
+  for (const edu of inlineElements) {
+    const resolved = (typeof edu === "string") ? (byUrn[edu] ?? null) : edu;
+    if (resolved) results.push(parseEducation(resolved));
+  }
+
+  if (results.length > 0) return results;
+
+  // Strategy 2: URN list under various keys
+  const eduUrns = profile['*educations'] ?? profile['*education'] ?? [];
+  for (const urn of eduUrns) {
+    const edu = byUrn[urn];
+    if (edu) results.push(parseEducation(edu));
+  }
+
+  if (results.length > 0) return results;
+
+  // Strategy 3: Scan included for Education entities that reference this profile
+  const profileUrn = profile.entityUrn ?? "";
+  for (const item of included) {
+    const t = item['$type'] ?? item.type ?? "";
+    if (!t.toLowerCase().includes("education")) continue;
+
+    // Check if this education entry belongs to this profile
+    const ownerUrn = item['*profile'] ?? item.profileId ?? item.profileUrn ?? "";
+    if (ownerUrn && profileUrn && !profileUrn.includes(ownerUrn) && !ownerUrn.includes(profileUrn)) continue;
+
+    results.push(parseEducation(item));
+  }
+
+  return results;
+}
+
+function parseEducation(edu) {
+  const startYear  = edu?.dateRange?.start?.year  ?? edu?.startYear  ?? null;
+  const endYear    = edu?.dateRange?.end?.year    ?? edu?.endYear    ?? null;
+  const endMonth   = edu?.dateRange?.end?.month   ?? null;
+  const hasEndDate = (edu?.dateRange?.end != null) || (endYear != null);
+
+  return {
+    schoolName:       edu?.schoolName   ?? edu?.school?.name ?? "",
+    degreeName:       edu?.degreeName   ?? edu?.degree?.name ?? "",
+    fieldOfStudy:     edu?.fieldOfStudy ?? edu?.fieldOfStudyV2?.name ?? "",
+    startYear,
+    endYear,
+    endMonth,
+    currentlyEnrolled: detectEnrolled(hasEndDate, endYear, endMonth),
+  };
+}
+
+// ─── Enrollment detection ─────────────────────────────────────────────────────
+function detectEnrolled(hasEndDate, endYear, endMonth) {
+  if (!hasEndDate) return true; // no end date = still attending
+
+  if (endYear == null) return false;
+
+  const now = new Date();
+  const currentYear  = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  if (endYear > currentYear) return true;
+  if (endYear === currentYear && (endMonth == null || endMonth >= currentMonth)) return true;
+  return false;
+}
+
+// ─── Filter ───────────────────────────────────────────────────────────────────
+function findMatchingEducation(educations, schoolQuery, currentlyEnrolledOnly) {
+  const query = schoolQuery.toLowerCase().trim();
+  for (const edu of educations) {
+    if (!edu.schoolName.toLowerCase().includes(query)) continue;
+    if (currentlyEnrolledOnly && !edu.currentlyEnrolled) continue;
+    return edu;
+  }
+  return null;
+}
+
+// ─── Voyager API fetch ────────────────────────────────────────────────────────
 async function fetchConnectionsPage(start, csrfToken, attempt = 1) {
   const url = new URL(`${BASE_URL}/voyager/api/relationships/dash/connections`);
   url.searchParams.set("decorationId", "com.linkedin.voyager.dash.deco.web.mynetwork.ConnectionListWithProfile-15");
@@ -123,141 +252,52 @@ async function fetchConnectionsPage(start, csrfToken, attempt = 1) {
 
   let response;
   try {
-    response = await fetch(url.toString(), {
-      method: "GET",
-      headers,
-      credentials: "include",
-    });
-  } catch (networkErr) {
-    reportError(`Network error: ${networkErr.message}`);
+    response = await fetch(url.toString(), { method: "GET", headers, credentials: "include" });
+  } catch (err) {
+    reportError(`Network error: ${err.message}`);
     return null;
   }
 
   if (response.status === 999) {
-    reportError(
-      "LinkedIn's anti-bot page was triggered (999). " +
-      "Wait a few minutes, refresh LinkedIn, then try again."
-    );
+    reportError("LinkedIn's anti-bot page was triggered (999). Wait a few minutes, refresh LinkedIn, and try again.");
     return null;
   }
-
   if (response.status === 429) {
     if (attempt <= MAX_RETRIES) {
-      reportStatus(`Rate limited. Waiting 10 seconds… (retry ${attempt}/${MAX_RETRIES})`);
+      reportStatus(`Rate limited. Waiting 10s… (retry ${attempt}/${MAX_RETRIES})`);
       await sleep(10000);
       return fetchConnectionsPage(start, csrfToken, attempt + 1);
     }
-    reportError("Rate limited by LinkedIn too many times. Please wait a few minutes and try again.");
+    reportError("Rate limited too many times. Wait a few minutes and try again.");
     return null;
   }
-
   if (response.status === 401 || response.status === 403) {
-    reportError(
-      "LinkedIn rejected the request (auth error). " +
-      "Make sure you are logged in to LinkedIn and try again."
-    );
+    reportError("Auth error. Make sure you're logged in to LinkedIn and try again.");
     return null;
   }
-
   if (!response.ok) {
-    reportError(`LinkedIn API returned status ${response.status}. Please try again.`);
+    reportError(`LinkedIn API returned ${response.status}. Please try again.`);
     return null;
   }
 
-  let json;
   try {
-    json = await response.json();
-  } catch (parseErr) {
-    reportError("Failed to parse LinkedIn API response. Try again.");
+    return await response.json();
+  } catch {
+    reportError("Failed to parse LinkedIn API response.");
     return null;
   }
-
-  return json;
 }
 
-// ─── Parse a connection element from the API response ────────────────────────
-function parseConnection(element) {
-  // The profile is nested under connectedMemberResolutionResult
-  const profile = element?.connectedMemberResolutionResult;
-  if (!profile) return null;
-
-  const educations = (profile.educations?.elements ?? []).map(parseEducation);
-
-  return {
-    firstName:  profile.firstName  ?? "",
-    lastName:   profile.lastName   ?? "",
-    headline:   profile.headline   ?? "",
-    profileUrl: profile.publicIdentifier
-      ? `https://www.linkedin.com/in/${profile.publicIdentifier}/`
-      : "",
-    entityUrn:  profile.entityUrn  ?? "",
-    educations,
-  };
-}
-
-function parseEducation(edu) {
-  const startYear  = edu?.dateRange?.start?.year  ?? null;
-  const endYear    = edu?.dateRange?.end?.year    ?? null;
-  const endMonth   = edu?.dateRange?.end?.month   ?? null;
-  const hasEndDate = edu?.dateRange?.end != null;
-
-  return {
-    schoolName:       edu?.schoolName    ?? "",
-    degreeName:       edu?.degreeName    ?? "",
-    fieldOfStudy:     edu?.fieldOfStudy  ?? "",
-    startYear,
-    endYear,
-    endMonth,
-    currentlyEnrolled: detectEnrolled(hasEndDate, endYear, endMonth),
-  };
-}
-
-// ─── Currently-enrolled detection ────────────────────────────────────────────
-function detectEnrolled(hasEndDate, endYear, endMonth) {
-  // No end date on the entry = still attending
-  if (!hasEndDate) return true;
-
-  if (endYear == null) return false; // malformed
-
-  const now = new Date();
-  const currentYear  = now.getFullYear();
-  const currentMonth = now.getMonth() + 1; // 1-indexed
-
-  if (endYear > currentYear) return true;
-  if (endYear === currentYear && (endMonth == null || endMonth >= currentMonth)) return true;
-  return false;
-}
-
-// ─── Filter: find the best matching education entry ───────────────────────────
-function findMatchingEducation(educations, schoolQuery, currentlyEnrolledOnly) {
-  const query = schoolQuery.toLowerCase().trim();
-
-  for (const edu of educations) {
-    const schoolLower = edu.schoolName.toLowerCase();
-    if (!schoolLower.includes(query)) continue;
-
-    // School matches — now check enrollment if required
-    if (currentlyEnrolledOnly && !edu.currentlyEnrolled) continue;
-
-    return edu; // Return the first matching entry
-  }
-  return null;
-}
-
-// ─── Message helpers ──────────────────────────────────────────────────────────
+// ─── Messaging ────────────────────────────────────────────────────────────────
 function reportProgress(fetched, total) {
   chrome.runtime.sendMessage({ action: "progress", fetched, total });
 }
-
 function reportStatus(text) {
   chrome.runtime.sendMessage({ action: "status", text });
 }
-
 function reportError(message) {
   chrome.runtime.sendMessage({ action: "error", message });
 }
-
-// ─── Utility ──────────────────────────────────────────────────────────────────
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
