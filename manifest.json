@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Connection Scraper",
+  "version": "1.0.0",
+  "description": "Scrape your LinkedIn connections and filter by school name and enrollment status",
+  "permissions": ["storage", "tabs", "scripting", "cookies"],
+  "host_permissions": ["https://www.linkedin.com/*"],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "LinkedIn Connection Scraper",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
