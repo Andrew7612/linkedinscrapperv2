@@ -1,0 +1,359 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  color: #1a1a1a;
+  background: #fff;
+  width: 420px;
+  min-height: 200px;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Header ---- */
+header {
+  background: #0a66c2;
+  color: #fff;
+  padding: 12px 16px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.logo svg {
+  fill: #fff;
+  flex-shrink: 0;
+}
+
+/* ---- Sections ---- */
+section {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---- Form ---- */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+label {
+  font-weight: 600;
+  font-size: 13px;
+  color: #333;
+}
+
+input[type="text"] {
+  border: 1.5px solid #d0d0d0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+  color: #1a1a1a;
+}
+
+input[type="text"]:focus {
+  border-color: #0a66c2;
+}
+
+.hint {
+  font-size: 11px;
+  color: #777;
+  line-height: 1.4;
+}
+
+/* ---- Toggle ---- */
+.toggle-group {
+  gap: 8px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: normal;
+  font-size: 14px;
+  user-select: none;
+}
+
+.toggle-label input[type="checkbox"] {
+  display: none;
+}
+
+.toggle-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: #d0d0d0;
+  border-radius: 10px;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transition: left 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.toggle-label input:checked ~ .toggle-track {
+  background: #0a66c2;
+}
+
+.toggle-label input:checked ~ .toggle-track .toggle-thumb {
+  left: 19px;
+}
+
+/* ---- Buttons ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #0a66c2;
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #004182;
+}
+
+.btn-secondary {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #e0e0e0;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+/* ---- Error box ---- */
+.error-box {
+  background: #fff0f0;
+  border: 1.5px solid #f5c6c6;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #c0392b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ---- Progress ---- */
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+#progress-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  border: none;
+  appearance: none;
+  overflow: hidden;
+  background: #e8e8e8;
+}
+
+#progress-bar::-webkit-progress-bar {
+  background: #e8e8e8;
+  border-radius: 4px;
+}
+
+#progress-bar::-webkit-progress-value {
+  background: #0a66c2;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.status-text {
+  font-size: 12px;
+  color: #777;
+  min-height: 16px;
+}
+
+/* ---- Results ---- */
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.results-summary {
+  font-size: 14px;
+  color: #333;
+}
+
+.results-count {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0a66c2;
+}
+
+#results-table-wrap {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1.5px solid #e8e8e8;
+  border-radius: 8px;
+}
+
+#results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+#results-table thead th {
+  background: #f5f5f5;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  color: #555;
+  border-bottom: 1.5px solid #e8e8e8;
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+}
+
+#results-table tbody tr:hover {
+  background: #f9f9f9;
+}
+
+#results-table tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: top;
+  line-height: 1.4;
+}
+
+#results-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.name-cell {
+  font-weight: 600;
+  color: #1a1a1a;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.school-cell {
+  color: #333;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.degree-cell {
+  color: #555;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enrolled-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.enrolled-yes {
+  background: #e8f4e8;
+  color: #2d7a2d;
+}
+
+.enrolled-no {
+  background: #f0f0f0;
+  color: #777;
+}
+
+.profile-link {
+  color: #0a66c2;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.profile-link:hover {
+  text-decoration: underline;
+}
+
+.results-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ---- Empty state ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  color: #999;
+  text-align: center;
+}
+
+.empty-state p {
+  font-size: 13px;
+}
