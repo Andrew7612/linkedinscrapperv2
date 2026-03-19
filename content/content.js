@@ -1,4 +1,7 @@
 // content.js — runs inside the LinkedIn tab, makes Voyager API calls
+(function () {
+if (window.__linkedinScraperActive) return;
+window.__linkedinScraperActive = true;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const BASE_URL    = "https://www.linkedin.com";
@@ -11,9 +14,6 @@ const MAX_RETRIES = 3;
 let stopped = false;
 
 // ─── Message listener ─────────────────────────────────────────────────────────
-if (!window.__linkedinScraperActive) {
-  window.__linkedinScraperActive = true;
-
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.action === "start") {
       stopped = false;
@@ -28,7 +28,7 @@ if (!window.__linkedinScraperActive) {
     }
     return false;
   });
-}
+
 
 // ─── Main scraper ─────────────────────────────────────────────────────────────
 async function runScraper({ schoolName, currentlyEnrolledOnly, csrfToken }) {
@@ -301,3 +301,5 @@ function reportError(message) {
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+})(); // end IIFE
